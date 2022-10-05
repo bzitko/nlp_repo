@@ -1,4 +1,5 @@
 tqdm
+scikit-learn
 matplotlib
 pandas
 seaborn
