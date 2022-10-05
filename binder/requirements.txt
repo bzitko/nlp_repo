@@ -1,5 +1,6 @@
 tqdm
 matplotlib
 pandas
+seaborn
 torch
 torchviz
