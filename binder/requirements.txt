@@ -1,5 +1,6 @@
 tqdm
 scikit-learn
+imbalanced-learn
 matplotlib
 pandas
 seaborn
