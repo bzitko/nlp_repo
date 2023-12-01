@@ -1,3 +1,4 @@
+import sys
 import torch
 import numpy as np
 from matplotlib import pyplot as plt
@@ -177,9 +178,9 @@ class StepByStep(object):
 
     def _make_train_step(self):
 
-        def perform_train_step(x, y):
+        def perform_train_step(xses, y):
             self.model.train()
-            yhat = self.model(x)
+            yhat = self.model(*xses)
             loss = self.loss_fn(yhat, y)
             loss.backward()
             self.optimizer.step()
@@ -190,9 +191,9 @@ class StepByStep(object):
 
     def _make_val_step(self):
 
-        def perform_val_step(x, y):
+        def perform_val_step(xses, y):
             self.model.eval()
-            yhat = self.model(x)
+            yhat = self.model(*xses)
             loss = self.loss_fn(yhat, y)
             return loss.item()
         
@@ -212,11 +213,11 @@ class StepByStep(object):
             return None
         
         mini_batch_losses = []
-        for x_batch, y_batch in data_loader:
-            x_batch = x_batch.to(self.device)
+        for *x_batches, y_batch in data_loader:
+            x_batches = [x_batch.to(self.device) for x_batch in x_batches]
             y_batch = y_batch.to(self.device)
 
-            mini_batch_loss = step(x_batch, y_batch)
+            mini_batch_loss = step(x_batches, y_batch)
             mini_batch_losses.append(mini_batch_loss)
         
         loss = torch.tensor(mini_batch_losses).mean()
@@ -227,6 +228,7 @@ class StepByStep(object):
     
     @staticmethod
     def set_seed(seed=96):
+        import numpy as np
         np.random.seed(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -271,12 +273,12 @@ class StepByStep(object):
         except KeyboardInterrupt:
             print("Training interrupted")
 
-    def predict(self, x):
+    def predict(self, xses):
         self.model.eval()
 
-        x_tensor = torch.as_tensor(x)
+        x_tensors = [torch.as_tensor(x).to(self.device) for x in xses]
 
-        yhat_tensor = self.model(x_tensor.to(self.device))
+        yhat_tensor = self.model(*x_tensors)
 
         self.model.train()
 
@@ -284,14 +286,19 @@ class StepByStep(object):
     
     def _train_callback(self):
         items = [f"Epoch: {self.total_epochs} "]
-        if self.train_losses:
+        if self.train_losses and self.train_losses[-1] is not None:
             items.append(f"train loss: {self.train_losses[-1]:.5f}")
-        if self.val_losses:
+        if self.val_losses and self.val_losses[-1] is not None:
             items.append(f"val loss: {self.val_losses[-1]:.5f}")
         if self.scheduler:
             lr = self.optimizer.param_groups[0]['lr']
-            items.append(f"lr: {lr:.5f}")
-        print(" ".join(items), end="\r")   
+            items.append(f"lr: {lr}")
+
+        txt = " ".join(items)
+        sys.stdout.write(txt)
+        sys.stdout.flush()
+        sys.stdout.write('\b')
+        #print(txt, end="\r")   
     
     def reset_parameters(self):
         with torch.no_grad():
