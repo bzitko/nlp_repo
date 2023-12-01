@@ -237,7 +237,6 @@ class StepByStep(object):
     def train_by_n_epochs(self, n_epochs):
         try:
             for epoch in range(n_epochs):
-                self._begin_epoch_callback()
                 self.total_epochs += 1
 
                 train_loss = self._mini_batch(validation=False)
@@ -246,7 +245,7 @@ class StepByStep(object):
                 with torch.no_grad():
                     val_loss = self._mini_batch(validation=True)
                     self.val_losses.append(val_loss)
-                self._end_epoch_callback()                    
+                self._epoch_callback()                    
         except KeyboardInterrupt:
             print("Training interrupted")
 
@@ -258,7 +257,6 @@ class StepByStep(object):
 
         try:
             while loss_change >= loss_change_treshold:
-                self._begin_epoch_callback()
                 self.total_epochs += 1
 
                 train_loss = self._mini_batch(validation=False)
@@ -271,7 +269,7 @@ class StepByStep(object):
                 loss_change = abs(last_loss - train_loss)
 
                 last_loss = train_loss
-                self._end_epoch_callback()
+                self._epoch_callback()
         except KeyboardInterrupt:
             print("Training interrupted")
 
@@ -286,11 +284,8 @@ class StepByStep(object):
 
         return yhat_tensor.detach().cpu()
     
-    def _begin_epoch_callback(self):
-        sys.stdout.flush()
-        sys.stdout.write('\b')
     
-    def _end_epoch_callback(self):
+    def _epoch_callback(self):
         items = [f"Epoch: {self.total_epochs} "]
         if self.train_losses and self.train_losses[-1] is not None:
             items.append(f"train loss: {self.train_losses[-1]:.5f}")
@@ -301,6 +296,8 @@ class StepByStep(object):
             items.append(f"lr: {lr}")
 
         txt = " ".join(items)
+        sys.stdout.flush()
+        sys.stdout.write('\r')
         sys.stdout.write(txt)
         #print(txt, end="\r")   
     
