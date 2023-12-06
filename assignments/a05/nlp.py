@@ -1,14 +1,16 @@
 import sys
+import random
 import torch
 import numpy as np
 from matplotlib import pyplot as plt
-from tqdm.notebook import tqdm
 from bidict import bidict
+from IPython.display import display, Markdown
 
 
 class Vocabulary(bidict):
-
-    #def __init__(self, pad_tok="<pad>", bgn_tok="<bos>", end_tok="<eos>", unk_tok="<unk>"):
+    """
+    A class for indexing elements of vocabulary.
+    """
     def __init__(self, pad_tok=None, bgn_tok=None, end_tok=None, unk_tok=None):
         self.pad_tok = pad_tok # 0
         self.bgn_tok = bgn_tok # 1
@@ -20,14 +22,24 @@ class Vocabulary(bidict):
             if tok:
                 init_vocab[tok] = len(init_vocab)
         super(Vocabulary, self).__init__(init_vocab)
-        
+
+    @property
+    def pad_idx(self):
+        """returns index of pad token"""
+        return self.get(self.pad_tok, None)
+
     def _add(self, tok):
+        """adds token and returns its index"""
         if tok in self:
             return self[tok]
         else:
             self[tok] = len(self)
 
     def fill(self, tokens, cutoff=None):
+        """
+        adds multiple tokens into vocabulary with possible cutoff of 
+        tokens whose frequency is less than given parameters
+        """
         if cutoff:
             counter = {}
             for tok in tokens:
@@ -42,22 +54,34 @@ class Vocabulary(bidict):
             self._add(tok)
     
     def __getitem__(self, tok):
+        """
+        returns index of the token or unknown token 
+        if token is not in vocabulaty
+        """
         if not tok in self:
             if not self.unk_tok:
-                raise
+                raise Exception(f"'{tok}' is not in vocabulary")
             else:
                 tok = self.unk_tok
         return super(Vocabulary, self).__getitem__(tok)
     
-    def vocabularize(self, tokens):
+    def vocabularize(self, tokens) -> torch.Tensor:
+        """
+        returns indices tensor of given tokens
+        """
         return torch.tensor([self[tok] for tok in tokens])
     
-    def unvocabularize(self, indices):
+    def unvocabularize(self, indices) -> list:
+        """
+        returns sequence of tokens according to their indices
+        """
         return [self.inverse[i] for i in indices]
 
     def pad(self, tokens, size, left=False):
+        """
+        """
         if not self.pad_tok:
-            raise
+            raise Exception(f"'Can't pad sequence of tokens when vocabulary hasn't pad token'")
 
         tokens = list(tokens)
         if self.bgn_tok:
@@ -77,9 +101,8 @@ class Vocabulary(bidict):
         return tokens
 
     def pad_many(self, tokenized_corpus, size, left=False):
-        return torch.stack([self.pad(tokens, size, left) 
+        return torch.stack([self.pad(tokens, size, left)
                             for tokens in tokenized_corpus])
-
 
 
 class Vectorizer(object):
@@ -228,7 +251,6 @@ class StepByStep(object):
     
     @staticmethod
     def set_seed(seed=96):
-        import numpy as np
         np.random.seed(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -320,3 +342,46 @@ class StepByStep(object):
         plt.ylabel("Loss")
         plt.legend()
         plt.tight_layout()
+
+
+def tensor2md(tensor, round=4, latex=False):
+    s = len(tensor.shape)
+    
+    if s == 0:
+        num = tensor.item()
+        if isinstance(num, int):
+            return str(num)
+        if isinstance(num, str):
+            return num
+        return f"{float(num):.{round}}"
+
+    txt = r"\begin{bmatrix} "
+    if s % 2 == 0:
+        m, n = tensor.shape[:2]
+        rows = []
+        for i in range(m):
+            row = []
+            for j in range(n):
+                row.append(tensor2md(tensor[i, j], round=round))
+            rows.append(r" & ".join(row))
+        txt += r" \\ ".join(rows)
+    elif s % 2 == 1:
+        n = tensor.shape[0]
+        row = []
+        for i in range(n):
+            row.append(tensor2md(tensor[i], round=round))
+        txt += r" & ".join(row)
+    txt += r"\end{bmatrix}"
+    if latex:
+        txt = "$" + txt + "$"
+    return txt
+
+def mdprint(*args, round=4, end=" "):
+    txt = []
+    for arg in args:
+        if isinstance(arg, (torch.Tensor, np.ndarray)):
+            txt.append(tensor2md(arg, round=round, latex=True))
+        else:
+            txt.append(arg)
+    display(Markdown(end.join(txt)))
+  
