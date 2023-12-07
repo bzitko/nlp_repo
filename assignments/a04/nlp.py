@@ -1,13 +1,16 @@
+import sys
+import random
 import torch
 import numpy as np
 from matplotlib import pyplot as plt
-from tqdm.notebook import tqdm
 from bidict import bidict
+from IPython.display import display, Markdown
 
 
 class Vocabulary(bidict):
-
-    #def __init__(self, pad_tok="<pad>", bgn_tok="<bos>", end_tok="<eos>", unk_tok="<unk>"):
+    """
+    A class for indexing elements of vocabulary.
+    """
     def __init__(self, pad_tok=None, bgn_tok=None, end_tok=None, unk_tok=None):
         self.pad_tok = pad_tok # 0
         self.bgn_tok = bgn_tok # 1
@@ -19,14 +22,24 @@ class Vocabulary(bidict):
             if tok:
                 init_vocab[tok] = len(init_vocab)
         super(Vocabulary, self).__init__(init_vocab)
-        
+
+    @property
+    def pad_idx(self):
+        """returns index of pad token"""
+        return self.get(self.pad_tok, None)
+
     def _add(self, tok):
+        """adds token and returns its index"""
         if tok in self:
             return self[tok]
         else:
             self[tok] = len(self)
 
     def fill(self, tokens, cutoff=None):
+        """
+        adds multiple tokens into vocabulary with possible cutoff of 
+        tokens whose frequency is less than given parameters
+        """
         if cutoff:
             counter = {}
             for tok in tokens:
@@ -41,24 +54,42 @@ class Vocabulary(bidict):
             self._add(tok)
     
     def __getitem__(self, tok):
+        """
+        returns index of the token or unknown token 
+        if token is not in vocabulaty
+        """
         if not tok in self:
             if not self.unk_tok:
-                raise
+                raise Exception(f"'{tok}' is not in vocabulary")
             else:
                 tok = self.unk_tok
         return super(Vocabulary, self).__getitem__(tok)
     
-    def vocabularize(self, tokens):
+    def vocabularize(self, tokens) -> torch.Tensor:
+        """
+        returns indices tensor of given tokens
+        """
         return torch.tensor([self[tok] for tok in tokens])
     
-    def unvocabularize(self, indices):
+    def unvocabularize(self, indices) -> list:
+        """
+        returns sequence of tokens according to their indices
+        """
         return [self.inverse[i] for i in indices]
 
     def pad(self, tokens, size, left=False):
+        """
+        """
         if not self.pad_tok:
-            raise
-        
-        tokens = list(tokens)[:size]
+            raise Exception(f"'Can't pad sequence of tokens when vocabulary hasn't pad token'")
+
+        tokens = list(tokens)
+        if self.bgn_tok:
+            tokens = [self.bgn_tok] + tokens
+        if self.end_tok:
+            tokens = tokens + [self.end_tok]
+
+        tokens = tokens[:size]
         tokens = self.vocabularize(tokens)
         if len(tokens) < size:
             pads = torch.tensor([self[self.pad_tok]] * (size - len(tokens)))
@@ -70,9 +101,8 @@ class Vocabulary(bidict):
         return tokens
 
     def pad_many(self, tokenized_corpus, size, left=False):
-        return torch.stack([self.pad(tokens, size, left) 
+        return torch.stack([self.pad(tokens, size, left)
                             for tokens in tokenized_corpus])
-
 
 
 class Vectorizer(object):
@@ -171,10 +201,9 @@ class StepByStep(object):
 
     def _make_train_step(self):
 
-        def perform_train_step(x, y):
+        def perform_train_step(xses, y):
             self.model.train()
-            yhat = self.model(x)
-            
+            yhat = self.model(*xses)
             loss = self.loss_fn(yhat, y)
             loss.backward()
             self.optimizer.step()
@@ -185,9 +214,9 @@ class StepByStep(object):
 
     def _make_val_step(self):
 
-        def perform_val_step(x, y):
+        def perform_val_step(xses, y):
             self.model.eval()
-            yhat = self.model(x)
+            yhat = self.model(*xses)
             loss = self.loss_fn(yhat, y)
             return loss.item()
         
@@ -207,11 +236,11 @@ class StepByStep(object):
             return None
         
         mini_batch_losses = []
-        for x_batch, y_batch in data_loader:
-            x_batch = x_batch.to(self.device)
+        for *x_batches, y_batch in data_loader:
+            x_batches = [x_batch.to(self.device) for x_batch in x_batches]
             y_batch = y_batch.to(self.device)
 
-            mini_batch_loss = step(x_batch, y_batch)
+            mini_batch_loss = step(x_batches, y_batch)
             mini_batch_losses.append(mini_batch_loss)
         
         loss = torch.tensor(mini_batch_losses).mean()
@@ -230,7 +259,6 @@ class StepByStep(object):
     def train_by_n_epochs(self, n_epochs):
         try:
             for epoch in range(n_epochs):
-                self._train_callback()
                 self.total_epochs += 1
 
                 train_loss = self._mini_batch(validation=False)
@@ -239,6 +267,7 @@ class StepByStep(object):
                 with torch.no_grad():
                     val_loss = self._mini_batch(validation=True)
                     self.val_losses.append(val_loss)
+                self._epoch_callback()                    
         except KeyboardInterrupt:
             print("Training interrupted")
 
@@ -250,7 +279,6 @@ class StepByStep(object):
 
         try:
             while loss_change >= loss_change_treshold:
-                self._train_callback()
                 self.total_epochs += 1
 
                 train_loss = self._mini_batch(validation=False)
@@ -263,30 +291,37 @@ class StepByStep(object):
                 loss_change = abs(last_loss - train_loss)
 
                 last_loss = train_loss
+                self._epoch_callback()
         except KeyboardInterrupt:
             print("Training interrupted")
 
-    def predict(self, x):
+    def predict(self, xses):
         self.model.eval()
 
-        x_tensor = torch.as_tensor(x).float()
+        x_tensors = [torch.as_tensor(x).to(self.device) for x in xses]
 
-        yhat_tensor = self.model(x_tensor.to(self.device))
+        yhat_tensor = self.model(*x_tensors)
 
         self.model.train()
 
         return yhat_tensor.detach().cpu()
     
-    def _train_callback(self):
+    
+    def _epoch_callback(self):
         items = [f"Epoch: {self.total_epochs} "]
-        if self.train_losses:
+        if self.train_losses and self.train_losses[-1] is not None:
             items.append(f"train loss: {self.train_losses[-1]:.5f}")
-        if self.val_losses:
+        if self.val_losses and self.val_losses[-1] is not None:
             items.append(f"val loss: {self.val_losses[-1]:.5f}")
         if self.scheduler:
             lr = self.optimizer.param_groups[0]['lr']
-            items.append(f"lr: {lr:.5f}")
-        print(" ".join(items), end="\r")   
+            items.append(f"lr: {lr}")
+
+        txt = " ".join(items)
+        sys.stdout.flush()
+        sys.stdout.write('\r')
+        sys.stdout.write(txt)
+        #print(txt, end="\r")   
     
     def reset_parameters(self):
         with torch.no_grad():
@@ -307,3 +342,46 @@ class StepByStep(object):
         plt.ylabel("Loss")
         plt.legend()
         plt.tight_layout()
+
+
+def tensor2md(tensor, round=4, latex=False):
+    s = len(tensor.shape)
+    
+    if s == 0:
+        num = tensor.item()
+        if isinstance(num, int):
+            return str(num)
+        if isinstance(num, str):
+            return num
+        return f"{float(num):.{round}}"
+
+    txt = r"\begin{bmatrix} "
+    if s % 2 == 0:
+        m, n = tensor.shape[:2]
+        rows = []
+        for i in range(m):
+            row = []
+            for j in range(n):
+                row.append(tensor2md(tensor[i, j], round=round))
+            rows.append(r" & ".join(row))
+        txt += r" \\ ".join(rows)
+    elif s % 2 == 1:
+        n = tensor.shape[0]
+        row = []
+        for i in range(n):
+            row.append(tensor2md(tensor[i], round=round))
+        txt += r" & ".join(row)
+    txt += r"\end{bmatrix}"
+    if latex:
+        txt = "$" + txt + "$"
+    return txt
+
+def mdprint(*args, round=4, end=" "):
+    txt = []
+    for arg in args:
+        if isinstance(arg, (torch.Tensor, np.ndarray)):
+            txt.append(tensor2md(arg, round=round, latex=True))
+        else:
+            txt.append(arg)
+    display(Markdown(end.join(txt)))
+  
