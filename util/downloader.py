@@ -1,9 +1,17 @@
+import sys
+IS_GOOGLE_COLAB = "google.colab" in sys.modules
 import os.path
 import urllib.request
 import urllib.parse
 
 
 URL = "https://raw.githubusercontent.com/bzitko/nlp_repo/main"
+
+def download(url, filename):
+        print(f"Downloading {filename} ", end="")
+        urllib.request.urlretrieve(url, filename)
+        print("DONE!")
+
 
 def prepare(relative_url):
 
@@ -23,24 +31,27 @@ def prepare(relative_url):
         return
     
     url = "/".join([URL] + [urllib.parse.quote(part) for part in download_parts])
-    print
+    
     if is_compressed :
         if not os.path.exists(download_filename):
-            urllib.request.urlretrieve(url, download_filename)
+            download(url, download_filename)
         uncompress(download_filename, filename)
     else:
-        urllib.request.urlretrieve(url, filename)
+        download(url, filename)
     
 def uncompress(compressed_filename, uncompressed_filename):
     compressed_parts = compressed_filename.split(".")
     ext = compressed_parts[-1]
+    print(f"Uncompressing to {uncompressed_filename} ", end="")
     if ext == "bz2":
         import bz2
         with open(compressed_filename, 'rb') as bzf, open(uncompressed_filename, 'wb') as fp:
-            fp.write(bz2.decompress(bzf.read()))
-        os.remove(compressed_filename)
+            fp.write(bz2.decompress(bzf.read()))    
     elif ext == "zip":
         from zipfile import ZipFile
         with ZipFile(compressed_filename) as zf:
             zf.extract(uncompressed_filename)
-        os.remove(compressed_filename)    
+
+    if IS_GOOGLE_COLAB:
+        os.remove(compressed_filename)
+    print("DONE!")     
